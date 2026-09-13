@@ -48,8 +48,7 @@ export default function App() {
 
   async function analyze() {
     const events = await getEvents();
-    const next = runOrchestrator(events);
-    setResult(next);
+    setResult(runOrchestrator(events));
     setToolsOpen(true);
     showToast("Orchestrator רץ");
   }

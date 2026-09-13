@@ -40,12 +40,11 @@ export default function MetricCapture({
       {!embedded && <h2>מדד בריאות</h2>}
       <p className="panelHint">בחר מדד מהיר או הזן ידנית. ערך מספרי בלבד.</p>
 
-      <div className="chipRow" role="list">
+      <div className="chipRow">
         {PRESETS.map((p) => (
           <button
             key={p.name}
             type="button"
-            role="listitem"
             className={`chip ${name === p.name ? "chipActive" : ""}`}
             onClick={() => {
               setName(p.name);
