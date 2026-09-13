@@ -1,16 +1,40 @@
 import { useEffect, useState } from "react";
-import type { HealthEvent } from "../core/types";
+import type { EventKind, HealthEvent } from "../core/types";
 import { deleteEvent, getEvents, getMedia } from "../core/db";
+
+const FILTERS: { id: "all" | EventKind; label: string }[] = [
+  { id: "all", label: "הכל" },
+  { id: "text", label: "טקסט" },
+  { id: "health-data", label: "מדדים" },
+  { id: "voice", label: "קול" },
+  { id: "video", label: "וידאו" },
+  { id: "image", label: "תמונה" }
+];
+
+const KIND_LABEL: Record<string, string> = {
+  text: "טקסט",
+  "health-data": "מדד",
+  voice: "קול",
+  video: "וידאו",
+  image: "תמונה",
+  sensor: "חיישן",
+  document: "מסמך",
+  system: "מערכת"
+};
 
 export default function Timeline({
   refreshKey,
-  onChanged
+  onChanged,
+  highlightId
 }: {
   refreshKey: number;
   onChanged: () => void;
+  highlightId?: string | null;
 }) {
   const [events, setEvents] = useState<HealthEvent[]>([]);
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState<"all" | EventKind>("all");
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
     void load();
@@ -28,7 +52,10 @@ export default function Timeline({
         if (blob) urls[mediaId] = URL.createObjectURL(blob);
       }
     }
-    setMediaUrls(urls);
+    setMediaUrls((prev) => {
+      Object.values(prev).forEach((u) => URL.revokeObjectURL(u));
+      return urls;
+    });
   }
 
   async function remove(id: string) {
@@ -36,48 +63,106 @@ export default function Timeline({
     onChanged();
   }
 
+  const filtered = filter === "all" ? events : events.filter((e) => e.kind === filter);
+
   return (
     <section className="timeline">
       <div className="timelineHeader">
-        <h2>Timeline</h2>
-        <span>{events.length} events</span>
+        <div>
+          <h2>Timeline</h2>
+          <p className="timelineSub">{events.length} אירועים מקומיים</p>
+        </div>
+        <div className="countBubble" aria-live="polite">
+          {filtered.length}
+        </div>
       </div>
 
-      {events.map((event) => {
-        const mediaId = event.payload.mediaId;
-        const mediaUrl = mediaId ? mediaUrls[mediaId] : undefined;
+      <div className="filterRow" role="tablist" aria-label="סינון טיימליין">
+        {FILTERS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            role="tab"
+            aria-selected={filter === f.id}
+            className={`filterChip ${filter === f.id ? "filterActive" : ""}`}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
 
-        return (
-          <article className="event" key={event.id}>
-            <div className="eventTop">
-              <strong>{event.kind}</strong>
-              <time>{new Date(event.createdAt).toLocaleString("he-IL")}</time>
-            </div>
+      {filtered.length === 0 ? (
+        <div className="emptyState">
+          <strong>עדיין אין אירועים כאן</strong>
+          <p>שמור טקסט, מדד או מדיה — והם יופיעו מיד בטיימליין.</p>
+        </div>
+      ) : (
+        filtered.map((event, index) => {
+          const mediaId = event.payload.mediaId;
+          const mediaUrl = mediaId ? mediaUrls[mediaId] : undefined;
+          const isOpen = expanded === event.id;
+          const isNew = highlightId === event.id;
 
-            {event.payload.text && <p>{event.payload.text}</p>}
+          return (
+            <article
+              className={`event ${isNew ? "eventNew" : ""}`}
+              key={event.id}
+              style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+            >
+              <button
+                type="button"
+                className="eventHit"
+                onClick={() => setExpanded(isOpen ? null : event.id)}
+              >
+                <div className="eventTop">
+                  <span className={`kindTag kind-${event.kind}`}>
+                    {KIND_LABEL[event.kind] ?? event.kind}
+                  </span>
+                  <time>{new Date(event.createdAt).toLocaleString("he-IL")}</time>
+                </div>
 
-            {event.payload.numeric && (
-              <p>
-                {event.payload.numeric.name}: <strong>{event.payload.numeric.value}</strong>{" "}
-                {event.payload.numeric.unit}
-              </p>
-            )}
+                {event.payload.text && <p className="eventBody">{event.payload.text}</p>}
 
-            {event.kind === "voice" && mediaUrl && <audio controls src={mediaUrl} />}
-            {event.kind === "video" && mediaUrl && <video controls playsInline src={mediaUrl} />}
-            {event.kind === "image" && mediaUrl && <img src={mediaUrl} alt="" />}
+                {event.payload.numeric && (
+                  <p className="eventMetric">
+                    <span>{event.payload.numeric.name}</span>
+                    <strong>
+                      {event.payload.numeric.value}
+                      {event.payload.numeric.unit ? ` ${event.payload.numeric.unit}` : ""}
+                    </strong>
+                  </p>
+                )}
 
-            <details>
-              <summary>Metadata</summary>
-              <pre>{JSON.stringify(event, null, 2)}</pre>
-            </details>
+                {event.kind === "image" && mediaUrl && (
+                  <img src={mediaUrl} alt="" className="eventThumb" />
+                )}
+                {event.kind === "voice" && <p className="eventBody">הקלטה קולית · לחץ לפתיחה</p>}
+                {event.kind === "video" && <p className="eventBody">הקלטת וידאו · לחץ לפתיחה</p>}
+              </button>
 
-            <button className="danger" onClick={() => remove(event.id)}>
-              מחק
-            </button>
-          </article>
-        );
-      })}
+              {isOpen && (
+                <div className="eventDetails">
+                  {event.kind === "voice" && mediaUrl && <audio controls src={mediaUrl} />}
+                  {event.kind === "video" && mediaUrl && (
+                    <video controls playsInline src={mediaUrl} />
+                  )}
+                  {event.kind === "image" && mediaUrl && <img src={mediaUrl} alt="" />}
+
+                  <details>
+                    <summary>Metadata</summary>
+                    <pre>{JSON.stringify(event, null, 2)}</pre>
+                  </details>
+
+                  <button className="danger" onClick={() => void remove(event.id)}>
+                    מחק אירוע
+                  </button>
+                </div>
+              )}
+            </article>
+          );
+        })
+      )}
     </section>
   );
 }
